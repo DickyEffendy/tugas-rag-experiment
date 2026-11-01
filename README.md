@@ -1,520 +1,510 @@
-# Simple RAG — Document Workspace
-
-Aplikasi Retrieval-Augmented Generation (RAG) untuk mengunggah PDF, mengajukan pertanyaan berdasarkan dokumen, dan membuat brief topik dengan referensi sumber. Backend menggunakan FastAPI, embedding lokal dari Sentence Transformers, Qdrant lokal untuk penyimpanan vektor, serta Groq untuk menghasilkan jawaban.
-
-Website disajikan langsung oleh FastAPI. Frontend menggunakan HTML, CSS, dan JavaScript tanpa proses build, dengan desain **Material 3 Sky Night** dari [DESIGN-SKYNIGHT-SUBTLE.md](DESIGN-SKYNIGHT-SUBTLE.md).
-
-## Daftar isi
-
-- [Fitur](#fitur)
-- [Teknologi](#teknologi)
-- [Persiapan](#persiapan)
-- [Instalasi dan menjalankan aplikasi](#instalasi-dan-menjalankan-aplikasi)
-- [Konfigurasi](#konfigurasi)
-- [Penggunaan website](#penggunaan-website)
-- [Format Markdown jawaban](#format-markdown-jawaban)
-- [Cara kerja RAG](#cara-kerja-rag)
-- [Dokumentasi API](#dokumentasi-api)
-- [Struktur proyek](#struktur-proyek)
-- [Penyimpanan dan siklus data](#penyimpanan-dan-siklus-data)
-- [Kustomisasi](#kustomisasi)
-- [Batasan aplikasi](#batasan-aplikasi)
-- [Pemecahan masalah](#pemecahan-masalah)
-
-## Fitur
-
-- Unggah satu PDF melalui pemilih file atau drag-and-drop.
-- Ekstraksi teks per halaman dan pemecahan menjadi potongan berbasis token.
-- Penyimpanan embedding dan metadata dokumen secara lokal.
-- Pertanyaan dengan jawaban berdasarkan konteks yang ditemukan di knowledge base.
-- Brief topik dengan struktur Summary, Key Points, dan Source References.
-- Referensi nama dokumen dan nomor halaman pada jawaban maupun brief.
-- Renderer Markdown untuk heading, bold, italic, daftar, tabel, kutipan, kode, dan format lainnya.
-- Tombol Copy untuk menyalin respons asli beserta sintaks Markdown-nya.
-- Daftar dokumen yang diunggah dalam sesi tab browser.
-- Indikator koneksi API, status pemrosesan, dan pesan kegagalan.
-- Layout responsif dengan palet navy, aksen biru langit, dan font sesuai spesifikasi desain.
-- Dokumentasi API interaktif bawaan FastAPI.
-
-## Teknologi
-
-| Komponen | Implementasi |
-| --- | --- |
-| Web server dan API | FastAPI, Uvicorn |
-| Frontend | HTML, CSS, JavaScript native |
-| Parser Markdown | Marked 18.1.1, file lokal |
-| Sanitasi HTML | DOMPurify 3.4.17, file lokal |
-| Ekstraksi PDF | PyMuPDF |
-| Pemecahan teks | LangChain RecursiveCharacterTextSplitter dengan tokenizer Hugging Face |
-| Embedding | Sentence Transformers |
-| Model embedding | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` |
-| Database vektor | Qdrant Client dalam mode penyimpanan lokal |
-| Penyedia LLM | Groq melalui `AsyncGroq` |
-| Konfigurasi environment | python-dotenv |
-
-## Persiapan
-
-- Python dengan dukungan dependensi di [requirements.txt](requirements.txt). Python 3.11 atau 3.12 dapat dijadikan pilihan awal untuk environment machine learning; versi Python lain bergantung pada dukungan paket yang dipasang.
-- API key Groq yang memiliki akses ke model yang dikonfigurasi.
-- Koneksi internet untuk instalasi paket, pengunduhan model/tokenizer saat belum tersedia di cache, dan permintaan ke Groq.
-- Ruang penyimpanan untuk paket Python, cache model, PDF, dan database Qdrant.
-
-Tidak diperlukan Node.js, npm, atau server Qdrant terpisah untuk konfigurasi saat ini.
-
-## Instalasi dan menjalankan aplikasi
+# RAG Parameter Exploration
+
+## 1. Informasi Eksperimen
 
-Jalankan perintah dari direktori proyek yang berisi `main.py`.
+| Komponen        | Keterangan                                                                                                        |
+|:----------------|:------------------------------------------------------------------------------------------------------------------|
+| Nama PDF        | `Artikel_PM25_UNAMA.pdf`                                                                                          |
+| Jumlah halaman  | 8 halaman                                                                                                         |
+| Topik           | Prediksi konsentrasi PM2,5 di Kota Jambi dan perbandingan Regresi Linier Berganda dengan Random Forest Regression |
+| Aplikasi        | Simple RAG                                                                                                        |
+| Vector database | Qdrant                                                                                                            |
+| Model embedding | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`                                                     |
+| Model LLM       | `openai/gpt-oss-120b` melalui Groq                                                                                |
+
+Satu PDF dan dua pertanyaan yang sama digunakan pada seluruh eksperimen.
+Setiap eksperimen mengubah satu parameter, sementara parameter lainnya
+dipertahankan.
+
+## 2. Pertanyaan Pengujian
+
+**Q1.** Apa saja variabel independen dan variabel dependen yang
+digunakan dalam penelitian untuk memprediksi konsentrasi PM2,5 di Kota
+Jambi?
+
+**Q2.** Berapa nilai R², RMSE, MAE, MAPE, dan akurasi untuk
+masing-masing algoritma Regresi Linier Berganda dan Random Forest
+Regression berdasarkan Tabel 2 Hasil Pengujian pada halaman 6?
 
-### Windows / PowerShell
+## 3. Baseline Configuration
 
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-Copy-Item .env.example .env
-```
+| Parameter       |                                                         Nilai |
+|:----------------|--------------------------------------------------------------:|
+| Temperature     |                                                           0.2 |
+| TOP_K           |                                                             4 |
+| CHUNK_SIZE      |                                                           100 |
+| CHUNK_OVERLAP   |                                                            20 |
+| Jumlah chunks   |                                                            85 |
+| Embedding model | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` |
+| LLM model       |                                         `openai/gpt-oss-120b` |
 
-Jika `.env` sudah ada, gunakan file tersebut; jangan menimpanya saat mengulang instalasi. Isi API key melalui editor:
+Baseline menghasilkan jawaban Q1 dan Q2 secara lengkap.
 
-```dotenv
-GROQ_API_KEY=isi_api_key_groq_anda
-GROQ_MODEL=openai/gpt-oss-120b
-```
+------------------------------------------------------------------------
 
-Jalankan server:
+## 4. Experiment 1: Temperature
 
-```powershell
-python -m uvicorn main:app --reload
-```
+### Temperature = 0.0
 
-Jika aktivasi virtual environment diblokir oleh pengaturan PowerShell, panggil interpreter secara langsung:
+**Actual Output Q1:** Variabel independen yang digunakan adalah suhu
+udara, kelembapan udara, kecepatan angin, curah hujan, dan jumlah titik
+panas. Variabel dependennya adalah konsentrasi PM2,5. Sumber: halaman 2.
 
-```powershell
-.\venv\Scripts\python.exe -m pip install -r requirements.txt
-.\venv\Scripts\python.exe -m uvicorn main:app --reload
-```
+**Actual Output Q2:** Output yang tercatat hanya menyampaikan bahwa
+Random Forest Regression memiliki RMSE lebih rendah dan dinilai lebih
+baik daripada Regresi Linier Berganda. Seluruh angka R², RMSE, MAE,
+MAPE, dan akurasi tidak muncul secara lengkap. Source dan similarity
+score Q2 tidak tercatat lengkap.
 
-### Linux / macOS
+**Observation:** Jawaban Q1 tetap memuat lima parameter cuaca dan
+konsentrasi PM2,5. Q2 belum menyajikan seluruh metrik. Temperature tidak
+mengubah retrieval, tetapi keluaran generation pada pengujian ini belum
+memberikan seluruh rincian yang diminta.
 
-```bash
-python3 -m venv venv
-source venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-cp .env.example .env
-# Edit .env dan isi GROQ_API_KEY sebelum menjalankan server.
-python -m uvicorn main:app --reload
-```
+### Temperature = 0.2
 
-### Alamat aplikasi
+**Actual Output Q1:** Variabel independen adalah suhu udara, kelembapan
+udara, kecepatan angin, curah hujan, dan jumlah titik panas. Variabel
+dependen adalah konsentrasi PM2,5. Sumber: halaman 2.
 
-| Halaman | Alamat default |
-| --- | --- |
-| Website | http://127.0.0.1:8000/ |
-| Swagger UI | http://127.0.0.1:8000/docs |
-| ReDoc | http://127.0.0.1:8000/redoc |
-| OpenAPI JSON | http://127.0.0.1:8000/openapi.json |
-| Health | http://127.0.0.1:8000/health |
+**Actual Output Q2:**
 
-Pada startup pertama, aplikasi memuat model embedding dan tokenizer; proses ini dapat memerlukan pengunduhan sebelum server siap. Untuk mengganti port, tambahkan `--port 8001`. Frontend menggunakan endpoint relatif sehingga otomatis mengikuti host dan port FastAPI.
+| Metrik       | Regresi Linier Berganda | Random Forest Regression |
+|:-------------|------------------------:|-------------------------:|
+| R²           |                   0,585 |                    0,588 |
+| RMSE (µg/m³) |                   6,904 |                    6,756 |
+| MAE (µg/m³)  |                   5,672 |                    5,490 |
+| MAPE (%)     |                    26,1 |                     26,0 |
+| Akurasi (%)  |                    73,9 |                     74,0 |
 
-Untuk menjalankan tanpa pemantauan perubahan kode:
+Sumber: halaman 7, 2, 6, dan 5. Tabel 2 sebagai sumber utama berada pada
+halaman 6.
 
-```bash
-python -m uvicorn main:app --host 127.0.0.1 --port 8000
-```
+**Similarity score baseline yang tercatat:**
 
-Gunakan satu worker dengan Qdrant lokal karena direktori database dikunci oleh proses yang membukanya.
+| Pertanyaan | Halaman | Similarity score |
+|:-----------|--------:|-----------------:|
+| Q1         |       2 |         0,882426 |
+| Q1         |       1 |         0,830789 |
+| Q2         |       7 |         0,822853 |
+| Q2         |       2 |         0,816785 |
+| Q2         |       6 |         0,807034 |
+| Q2         |       5 |         0,786520 |
+
+**Observation:** Temperature 0.2 menghasilkan jawaban Q1 dan Q2 secara
+lengkap pada baseline. Random Forest Regression memiliki R² dan akurasi
+sedikit lebih tinggi, serta RMSE, MAE, dan MAPE lebih rendah.
 
-## Konfigurasi
+### Temperature = 0.8
 
-### Environment variables
+**Actual Output Q1:** Jawaban tetap menyebutkan suhu udara, kelembapan
+udara, kecepatan angin, curah hujan, dan jumlah titik panas sebagai
+variabel independen. Variabel dependen tetap konsentrasi PM2,5.
+
+**Actual Output Q2:** Catatan pengujian menunjukkan keluaran yang tidak
+sepenuhnya konsisten. Salah satu keluaran memuat tabel metrik lengkap
+yang sama dengan baseline 0.2. Pada pengulangan lain, jawaban hanya
+menyebutkan bahwa Random Forest Regression memiliki RMSE lebih rendah
+dan akurasi lebih tinggi, tanpa seluruh angka. Pada keluaran lengkap,
+sumber yang tercatat adalah halaman 7, 2, 6, dan 5. Similarity score
+khusus temperature 0.8 tidak tercatat.
 
-Salin [.env.example](.env.example) ke `.env`. File `.env` dimuat oleh `config.py` dan sudah masuk `.gitignore`.
+**Observation:** Isi faktual Q1 tidak berubah. Pada Q2, keluaran lengkap
+memuat metrik yang sama dengan baseline, tetapi kelengkapan jawaban
+belum konsisten pada seluruh pengulangan.
 
-| Nama | Wajib | Nilai / kegunaan |
-| --- | --- | --- |
-| `GROQ_API_KEY` | Ya | API key yang digunakan SDK Groq pada backend |
-| `GROQ_MODEL` | Tidak | Model Groq; default kode saat ini adalah `openai/gpt-oss-120b` |
+### Kesimpulan Experiment Temperature
 
-Nama model default mengikuti konfigurasi proyek. Akses dan ketersediaan model bergantung pada akun Groq; ganti `GROQ_MODEL` dengan model yang tersedia untuk akun Anda bila diperlukan.
+Temperature memengaruhi generation, yaitu cara LLM menyusun jawaban.
+Parameter ini tidak mengubah retrieval, pembentukan chunk, embedding,
+atau vector database. Temperature 0.2 menjadi pilihan paling dapat
+dipertanggungjawabkan karena menghasilkan Q1 dan Q2 lengkap pada
+baseline. Hasil Q2 pada temperature 0.0 dan 0.8 belum konsisten.
 
-API key tidak dikirim ke browser. Permintaan generasi dilakukan oleh backend. Teks konteks yang ditemukan dari dokumen dan pertanyaan/topik dikirim ke Groq untuk menghasilkan respons.
+------------------------------------------------------------------------
 
-### Parameter di `config.py`
+## 5. Experiment 2: TOP_K
 
-Parameter berikut diatur dalam kode, bukan melalui environment variable:
+### TOP_K = 1
 
-| Parameter | Nilai saat ini | Fungsi |
-| --- | --- | --- |
-| `UPLOAD_DIR` | `data/uploads/` | Lokasi PDF yang diunggah |
-| `QDRANT_PATH` | `qdrant_data/` | Database vektor lokal |
-| `COLLECTION_NAME` | `rag_documents` | Nama koleksi Qdrant |
-| `EMBEDDING_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Model embedding dan tokenizer |
-| `TOP_K` | `4` | Jumlah potongan yang diambil untuk pertanyaan |
-| `BRIEF_TOP_K` | `6` | Jumlah potongan yang diambil untuk brief |
-| `CHUNK_SIZE` | `100` | Target ukuran maksimal potongan berdasarkan tokenizer |
-| `CHUNK_OVERLAP` | `20` | Tumpang tindih token antar potongan |
+**Actual Output Q1:** Aplikasi menampilkan pesan bahwa jawaban tidak
+ditemukan dalam dokumen. Sumber: halaman 2. Similarity score: 0,8824.
 
-`llm.py` mengatur temperature generasi ke `0.2`.
+**Actual Output Q2:** Jawaban hanya menyampaikan kesimpulan umum bahwa
+Random Forest Regression lebih baik karena RMSE lebih rendah. Seluruh
+metrik tidak disajikan. Sumber: halaman 7. Similarity score: 0,8225.
 
-Jika model embedding diganti, gunakan koleksi/database yang sesuai dan ingest ulang dokumen. Vektor dari model berbeda tidak semestinya dicampur, bahkan bila dimensinya sama.
+**Observation:** Satu konteks belum cukup untuk menjawab kedua
+pertanyaan secara lengkap, meskipun similarity score dokumen yang
+terambil relatif tinggi.
 
-## Penggunaan website
+### TOP_K = 4
 
-### Mengunggah PDF
+**Actual Output Q1:** Aplikasi menemukan lima variabel independen, yaitu
+suhu udara, kelembapan udara, kecepatan angin, curah hujan, dan jumlah
+titik panas. Variabel dependen adalah konsentrasi PM2,5. Sumber utama:
+halaman 2. Similarity score khusus TOP_K = 4 tidak tercatat.
 
-1. Pilih PDF melalui **browse files** atau seret file ke area **Drop a PDF here**.
-2. Klik **Upload document**.
-3. Tunggu proses pembacaan halaman, chunking, embedding, dan penyimpanan.
-4. Setelah berhasil, dokumen muncul di **Uploaded this session**, beserta jumlah halaman terbaca dan potongan tersimpan.
+**Actual Output Q2:**
 
-Gunakan PDF yang memiliki teks yang dapat diseleksi. PDF scan tanpa lapisan teks memerlukan OCR di luar aplikasi ini.
+| Metrik       | Regresi Linier Berganda | Random Forest Regression |
+|:-------------|------------------------:|-------------------------:|
+| R²           |                   0,585 |                    0,588 |
+| RMSE (µg/m³) |                   6,904 |                    6,756 |
+| MAE (µg/m³)  |                   5,672 |                    5,490 |
+| MAPE (%)     |                    26,1 |                     26,0 |
+| Akurasi (%)  |                    73,9 |                     74,0 |
 
-### Mengajukan pertanyaan
+Sumber: halaman 7, 2, 6, dan 5. Halaman 6 menjadi sumber utama Tabel 2.
+Similarity score khusus TOP_K = 4 tidak tercatat.
 
-1. Pilih tab **Ask a question**.
-2. Masukkan pertanyaan yang spesifik, misalnya `Apa tiga rekomendasi utama dalam laporan ini?`.
-3. Klik **Ask question**, atau tekan `Ctrl+Enter` / `Cmd+Enter`.
-4. Baca respons di **Your answer** dan referensi di **Source references**.
+**Observation:** TOP_K = 4 menghasilkan jawaban Q1 dan Q2 secara
+lengkap. Konteks yang diambil sudah mencakup informasi variabel
+penelitian dan tabel perbandingan algoritma.
 
-Pertanyaan menelusuri seluruh knowledge base, termasuk dokumen dari sesi sebelumnya. Tidak perlu mengunggah ulang dokumen hanya karena daftar sesi browser kosong.
+### TOP_K = 8
 
-### Membuat brief
+**Actual Output Q1:** Aplikasi menemukan lima variabel independen dan
+variabel dependen konsentrasi PM2,5.
 
-1. Pilih tab **Create a brief**.
-2. Masukkan topik, misalnya `Risiko operasional dan langkah mitigasi`.
-3. Klik **Create brief**, atau tekan `Ctrl+Enter` / `Cmd+Enter`.
-4. Respons ditampilkan pada **Your brief** dengan referensi sumber.
+| Halaman | Similarity score |
+|--------:|-----------------:|
+|       2 |           0,8824 |
+|       1 |           0,8308 |
+|       3 |           0,7539 |
+|       5 |           0,6801 |
 
-Respons terakhir pada masing-masing tab tetap tersedia selama halaman terbuka. Respons sebelumnya dipertahankan jika permintaan berikutnya gagal. Riwayat percakapan tidak disimpan.
+**Actual Output Q2:** Hasil metrik sama dengan TOP_K = 4.
 
-### Status API
+| Metrik       | Regresi Linier Berganda | Random Forest Regression |
+|:-------------|------------------------:|-------------------------:|
+| R²           |                   0,585 |                    0,588 |
+| RMSE (µg/m³) |                   6,904 |                    6,756 |
+| MAE (µg/m³)  |                   5,672 |                    5,490 |
+| MAPE (%)     |                    26,1 |                     26,0 |
+| Akurasi (%)  |                    73,9 |                     74,0 |
 
-Indikator header meminta `/health` ketika halaman dibuka. Tombol refresh memeriksa ulang koneksi. **API online** berarti endpoint health merespons; indikator ini tidak memverifikasi keberhasilan generasi Groq atau kualitas isi knowledge base.
+| Halaman | Similarity score |
+|--------:|-----------------:|
+|       7 |           0,8229 |
+|       2 |           0,8168 |
+|       6 |           0,8070 |
+|       5 |           0,7865 |
 
-## Format Markdown jawaban
+**Observation:** TOP_K = 8 menghasilkan jawaban lengkap, tetapi tidak
+menambahkan informasi faktual yang berarti dibandingkan TOP_K = 4.
 
-Jawaban dan brief diproses sebagai Markdown dengan GitHub Flavored Markdown (GFM) menggunakan [Marked](https://marked.js.org/). HTML hasil parsing disaring oleh [DOMPurify](https://github.com/cure53/DOMPurify) sebelum ditampilkan.
+### Kesimpulan Experiment TOP_K
 
-Format yang didukung:
+TOP_K = 1 belum menyediakan konteks yang cukup. TOP_K = 4 dan TOP_K = 8
+sama-sama menghasilkan jawaban lengkap. TOP_K = 8 mengambil lebih banyak
+konteks, tetapi tidak memberi tambahan informasi faktual yang berarti.
+TOP_K = 4 lebih efisien dan memadai untuk dokumen ini.
 
-- Heading `#` sampai `######`.
-- **Bold**, *italic*, ~~strikethrough~~, dan kombinasi penekanan.
-- Daftar bernomor, bullet, daftar bertingkat, dan task list.
-- Tabel dengan heading kolom dan alignment.
-- Kutipan / blockquote dan garis pemisah.
-- Inline code dan blok kode berpagar, termasuk penanda bahasa.
-- Tautan, gambar, serta HTML terbatas seperti `<details>`, `<summary>`, `<sup>`, dan `<sub>`.
-- Pergantian baris biasa ditampilkan sebagai line break.
+------------------------------------------------------------------------
 
-Contoh output LLM yang dapat dirender:
+## 6. Experiment 3: Chunk Size
 
-````markdown
-## Ringkasan
+Pengujian ini menggunakan CHUNK_OVERLAP = 20. Setiap perubahan
+CHUNK_SIZE diikuti penghapusan database Qdrant dan ingestion ulang PDF.
 
-Temuan **utama** adalah peningkatan efisiensi dengan beberapa *catatan*.
+### CHUNK_SIZE = 50
 
-| Aspek | Temuan | Prioritas |
-| :--- | :--- | :---: |
-| Proses | Waktu pengerjaan turun | Tinggi |
-| Risiko | Perlu pemantauan berkala | Sedang |
+**Chunks Stored:** 221.
 
-### Tindak lanjut
+**Actual Output Q1:** Aplikasi berhasil menemukan lima variabel
+independen dan variabel dependen konsentrasi PM2,5. Sumber: halaman 2,
+7, dan 1.
 
-1. Tinjau rekomendasi.
-2. Tetapkan penanggung jawab.
+**Actual Output Q2:** Jawaban hanya menampilkan sebagian metrik, yaitu
+R² sebesar 0,585 dan 0,588 serta RMSE sebesar 6,904 dan 6,756. MAE,
+MAPE, dan akurasi tidak muncul secara lengkap. Sumber: halaman 5, 6, dan
+7. Similarity score tidak tercatat.
 
-- [x] Identifikasi masalah
-- [ ] Susun rencana
+**Observation:** CHUNK_SIZE = 50 menghasilkan chunk paling banyak, yaitu
+221. Namun, jumlah chunk yang lebih banyak tidak otomatis meningkatkan
+kelengkapan jawaban. Q2 belum menampilkan seluruh metrik.
 
-> Kesimpulan harus tetap merujuk pada dokumen sumber.
+### CHUNK_SIZE = 100
 
-Gunakan `TOP_K` untuk mengatur jumlah potongan konteks.
+**Chunks Stored:** 85.
 
-```python
-print("Contoh blok kode")
-```
-````
+**Actual Output Q1:** Aplikasi berhasil mengidentifikasi lima variabel
+independen dan satu variabel dependen. Sumber utama: halaman 2.
 
-Tabel lebar dan blok kode memiliki scroll horizontal. Area tabel dapat difokuskan dengan keyboard. Tautan dibuka di tab baru. Checkbox task list ditampilkan sebagai status, bukan kontrol yang bisa diedit.
+**Actual Output Q2:** Aplikasi berhasil menampilkan seluruh nilai R²,
+RMSE, MAE, MAPE, dan akurasi seperti tabel baseline. Sumber baseline
+yang tercatat: halaman 7, 2, 6, dan 5. Similarity score khusus percobaan
+ini tidak tercatat secara terpisah.
 
-Tombol **Copy** menyalin respons asli, sehingga sintaks Markdown tetap bisa ditempel ke editor lain. Jika library lokal tidak termuat, respons ditampilkan sebagai teks biasa.
+**Observation:** CHUNK_SIZE = 100 menghasilkan 85 chunk dan dapat
+menjawab Q1 serta Q2 secara lengkap. Konfigurasi ini menjadi baseline
+yang berhasil.
 
-Renderer tidak menjalankan script, CSS arbitrer, iframe, atau event handler dari output LLM. Rumus LaTeX, diagram Mermaid, dan syntax highlighting berwarna belum memiliki renderer khusus; blok kode tetap tampil dengan font monospace. Pemformatan mengikuti isi yang dihasilkan LLM—renderer tidak otomatis mengubah paragraf menjadi tabel.
+### CHUNK_SIZE = 120
 
-Library Markdown disimpan pada `static/vendor/`, sehingga rendering tidak memerlukan CDN saat runtime. Font tetap menggunakan Google Fonts dengan fallback sans-serif/monospace jika tidak tersedia.
+**Chunks Stored:** 71.
 
-## Cara kerja RAG
+**Actual Output Q1:** Aplikasi berhasil mengidentifikasi lima variabel
+independen dan variabel dependen konsentrasi PM2,5. Sumber: halaman 1
+dan 2.
 
-### Pipeline ingestion
+**Actual Output Q2:** Aplikasi berhasil menampilkan seluruh metrik kedua
+algoritma. Sumber utama: halaman 6, dengan referensi tambahan halaman 2,
+5, dan 7. Similarity score tidak tercatat.
 
-```text
-PDF
-  → ekstraksi teks per halaman (PyMuPDF)
-  → pemecahan teks berbasis tokenizer
-  → embedding lokal (Sentence Transformers)
-  → penyimpanan vektor dan metadata di Qdrant
-```
+**Observation:** CHUNK_SIZE = 120 menghasilkan 71 chunk, lebih sedikit
+daripada CHUNK_SIZE = 100. Q1 dan Q2 tetap berhasil dijawab secara
+lengkap.
 
-Setiap potongan menyimpan teks, nama sumber, nomor halaman asli PDF, dan indeks potongan dalam halaman. Halaman tanpa teks dilewati. Karena itu, `pages_read` menghitung halaman yang memiliki teks, bukan selalu total halaman PDF.
+### Kesimpulan Experiment Chunk Size
 
-### Pipeline pertanyaan / brief
+CHUNK_SIZE = 50 menghasilkan 221 chunk, CHUNK_SIZE = 100 menghasilkan 85
+chunk, dan CHUNK_SIZE = 120 menghasilkan 71 chunk. CHUNK_SIZE = 50 belum
+memberikan jawaban Q2 lengkap, sedangkan CHUNK_SIZE = 100 dan 120
+berhasil menjawab kedua pertanyaan. Jumlah chunk paling banyak tidak
+selalu menghasilkan retrieval terbaik.
 
-```text
-Pertanyaan atau topik
-  → embedding query
-  → pencarian similarity di Qdrant
-  → penggabungan potongan sebagai konteks
-  → pengiriman system prompt + konteks ke Groq
-  → respons teks + metadata sumber
-  → rendering Markdown di browser
-```
+------------------------------------------------------------------------
 
-Pencarian menggunakan cosine similarity. Pertanyaan mengambil maksimal `TOP_K` potongan, sedangkan brief mengambil maksimal `BRIEF_TOP_K` potongan. Referensi sumber dideduplikasi berdasarkan pasangan nama dokumen dan halaman.
+## 7. Experiment 4: Chunk Overlap
 
-`score` adalah skor kemiripan hasil pencarian, bukan persentase keyakinan LLM. Daftar `sources` menunjukkan halaman yang masuk ke konteks; daftar ini tidak menjamin setiap klaim jawaban memiliki kutipan individual.
+Pengujian ini menggunakan CHUNK_SIZE = 100. Setiap perubahan
+CHUNK_OVERLAP diikuti penghapusan database Qdrant dan ingestion ulang
+PDF.
 
-## Dokumentasi API
+### CHUNK_OVERLAP = 0
 
-Contoh respons di bawah bersifat ilustratif. Isi jawaban, jumlah potongan, dan skor akan mengikuti dokumen dan hasil model.
+**Chunks Stored:** 84.
 
-### Ringkasan route
+**Actual Output Q1:** Aplikasi belum berhasil menemukan jawaban secara
+memadai. Referensi yang tercatat mengarah ke halaman 2 dan 5.
 
-| Method | Route | Fungsi |
-| --- | --- | --- |
-| `GET` | `/` | Halaman website |
-| `GET` | `/static/{path}` | Asset frontend dan library lokal |
-| `GET` | `/health` | Status dasar API |
-| `POST` | `/ingest` | Unggah dan indeks PDF |
-| `POST` | `/ask` | Pertanyaan berbasis dokumen |
-| `POST` | `/brief` | Brief berdasarkan topik |
-| `GET` | `/docs` | Swagger UI |
-| `GET` | `/redoc` | Dokumentasi ReDoc |
-| `GET` | `/openapi.json` | Skema OpenAPI |
+**Actual Output Q2:** Aplikasi berhasil menampilkan seluruh metrik
+perbandingan kedua algoritma. Sumber utama: halaman 6. Similarity score
+tidak tercatat.
 
-### `GET /health`
+**Observation:** Tanpa overlap, Q1 gagal dijawab secara memadai,
+meskipun Q2 berhasil.
 
-```json
-{
-  "status": "OK"
-}
-```
+### CHUNK_OVERLAP = 20
 
-### `POST /ingest`
+**Chunks Stored:** 85.
 
-Kirim `multipart/form-data` dengan field `file` berisi satu PDF. Jangan menggunakan JSON untuk endpoint ini.
+**Actual Output Q1:** Aplikasi berhasil menemukan lima variabel
+independen dan variabel dependen konsentrasi PM2,5. Sumber utama:
+halaman 2.
 
-```bash
-curl -X POST http://127.0.0.1:8000/ingest -F "file=@laporan.pdf"
-```
+**Actual Output Q2:** Aplikasi berhasil menampilkan seluruh metrik
+perbandingan kedua algoritma. Sumber utama: halaman 6. Referensi
+baseline lain yang tercatat adalah halaman 7, 2, dan 5. Similarity score
+khusus percobaan ini tidak tercatat.
 
-Pada Windows PowerShell, gunakan `curl.exe` untuk contoh multipart di atas.
+**Observation:** Overlap 20 mempertahankan sebagian teks di antara chunk
+berurutan. Pada percobaan ini, Q1 dan Q2 berhasil dijawab lengkap.
 
-Contoh respons:
+### CHUNK_OVERLAP = 40
 
-```json
-{
-  "source": "laporan.pdf",
-  "pages_read": 12,
-  "chunks_stored": 84
-}
-```
+**Chunks Stored:** 101.
 
-| Field | Arti |
-| --- | --- |
-| `source` | Nama file yang dipakai sebagai sumber |
-| `pages_read` | Jumlah halaman dengan teks yang berhasil diekstrak |
-| `chunks_stored` | Jumlah potongan yang dimasukkan ke Qdrant |
+**Actual Output Q1:** Aplikasi berhasil menemukan variabel independen
+dan dependen. Sumber: halaman 1 dan 2.
 
-### `POST /ask`
+**Actual Output Q2:** Aplikasi berhasil menampilkan seluruh metrik
+perbandingan kedua algoritma. Sumber utama: halaman 6. Similarity score
+tidak tercatat.
 
-Content type: `application/json`.
+**Observation:** Overlap 40 menghasilkan 101 chunk, lebih banyak
+dibandingkan overlap 0 dan 20. Q1 dan Q2 berhasil dijawab, tetapi jumlah
+chunk meningkat.
 
-```json
-{
-  "question": "Apa rekomendasi utama dalam laporan ini?"
-}
-```
+### Kesimpulan Experiment Chunk Overlap
 
-Contoh respons:
+CHUNK_OVERLAP = 0 menghasilkan 84 chunk, CHUNK_OVERLAP = 20 menghasilkan
+85 chunk, dan CHUNK_OVERLAP = 40 menghasilkan 101 chunk. Q1 gagal pada
+overlap 0, sedangkan overlap 20 dan 40 berhasil. Q2 berhasil pada ketiga
+variasi. Untuk dokumen ini, overlap 20 memberikan keseimbangan yang baik
+antara jumlah chunk dan kelengkapan jawaban.
 
-```json
-{
-  "answer": "Rekomendasi utama adalah **memperkuat pemantauan risiko**.",
-  "sources": [
-    {
-      "source": "laporan.pdf",
-      "page": 3,
-      "score": 0.82
-    }
-  ]
-}
-```
+------------------------------------------------------------------------
 
-Contoh PowerShell:
+## 8. Final Configuration
 
-```powershell
-$body = @{ question = 'Apa rekomendasi utama dalam laporan ini?' } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8000/ask' -ContentType 'application/json' -Body $body
-```
+| Parameter       |                                                   Nilai akhir |
+|:----------------|--------------------------------------------------------------:|
+| Temperature     |                                                           0.2 |
+| TOP_K           |                                                             4 |
+| CHUNK_SIZE      |                                                           100 |
+| CHUNK_OVERLAP   |                                                            20 |
+| Jumlah chunks   |                                                            85 |
+| Embedding model | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` |
+| LLM model       |                                         `openai/gpt-oss-120b` |
 
-### `POST /brief`
+Konfigurasi ini dipilih karena merupakan baseline yang telah
+menghasilkan jawaban Q1 dan Q2 secara lengkap. TOP_K = 4 menyediakan
+konteks yang cukup tanpa tambahan konteks yang tidak memberi informasi
+faktual baru seperti pada TOP_K = 8. CHUNK_SIZE = 100 dan CHUNK_OVERLAP
+= 20 menghasilkan jawaban lengkap dengan 85 chunk.
 
-Content type: `application/json`.
+CHUNK_SIZE = 120 menjadi alternatif karena menghasilkan 71 chunk dan
+tetap menjawab Q1 serta Q2 secara lengkap. Namun, catatan similarity
+score belum cukup untuk menyatakan bahwa konfigurasi tersebut lebih
+unggul daripada baseline.
 
-```json
-{
-  "topic": "Risiko operasional dan mitigasi"
-}
-```
+## 9. Final Questions
 
-Contoh respons:
+**1. Parameter mana yang paling terasa memengaruhi hasil aplikasi?**
 
-```json
-{
-  "topic": "Risiko operasional dan mitigasi",
-  "brief": "## Summary\nRingkasan topik.\n\n## Key Points\n- Poin utama.\n\n## Source References\n- laporan.pdf, halaman 3.",
-  "sources": [
-    {
-      "source": "laporan.pdf",
-      "page": 3,
-      "score": 0.82
-    }
-  ]
-}
-```
+CHUNK_SIZE, CHUNK_OVERLAP, dan TOP_K paling terlihat memengaruhi
+kelengkapan konteks yang diterima LLM. TOP_K = 1 belum menghasilkan
+jawaban lengkap. CHUNK_SIZE = 50 menghasilkan banyak chunk, tetapi Q2
+belum menampilkan seluruh metrik. CHUNK_OVERLAP = 0 juga belum berhasil
+menjawab Q1. Kualitas retrieval bergantung pada jumlah dan susunan
+konteks yang diambil.
 
-Contoh PowerShell:
+**2. Apakah Temperature memengaruhi Retrieval atau Generation?**
 
-```powershell
-$body = @{ topic = 'Risiko operasional dan mitigasi' } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8000/brief' -ContentType 'application/json' -Body $body
-```
+Temperature memengaruhi generation, yaitu proses LLM menyusun jawaban
+berdasarkan konteks yang diterima. Temperature tidak mengubah proses
+retrieval, pembentukan embedding, atau penyimpanan vector. Isi faktual
+Q1 tetap sama pada beberapa nilai temperature. Perbedaan lebih terlihat
+pada penyajian dan kelengkapan Q2.
 
-### Respons kegagalan
+**3. Apakah TOP_K yang lebih besar selalu menghasilkan jawaban yang
+lebih baik?**
 
-| Status | Kondisi |
-| --- | --- |
-| `400` | Nama file kosong atau ekstensi bukan `.pdf` pada ingestion |
-| `422` | Field wajib tidak dikirim atau tipe request tidak sesuai skema FastAPI |
-| `500` | Kegagalan ekstraksi, embedding, penyimpanan, atau proses backend lain |
+Tidak. TOP_K = 1 belum memberikan konteks yang cukup. TOP_K = 4 dan 8
+sama-sama menghasilkan jawaban lengkap, tetapi TOP_K = 8 tidak
+menambahkan informasi faktual yang berarti dibandingkan TOP_K = 4.
 
-Ingestion mengembalikan pesan exception dalam field `detail`, misalnya:
+**4. Apa yang terjadi ketika Chunk Size dibuat lebih kecil?**
 
-```json
-{
-  "detail": "No readable text was found in the PDF."
-}
-```
+Jumlah chunk meningkat karena dokumen terbagi menjadi bagian lebih
+pendek. CHUNK_SIZE = 50 menghasilkan 221 chunk, sedangkan CHUNK_SIZE =
+100 menghasilkan 85 chunk. Pada pengujian ini, CHUNK_SIZE = 50 belum
+menghasilkan jawaban Q2 lengkap. Chunk terlalu kecil dapat memisahkan
+informasi yang saling berkaitan.
 
-Endpoint `/ask` dan `/brief` saat ini tidak membungkus exception dengan format error khusus. Kegagalan server dapat menghasilkan respons non-JSON; frontend menampilkannya sebagai pesan kegagalan umum. Field pertanyaan/topik wajib berupa string, tetapi validasi string kosong atau whitespace hanya dilakukan di frontend saat ini.
+**5. Apa fungsi Chunk Overlap?**
 
-## Struktur proyek
+Chunk Overlap mempertahankan sebagian teks dari chunk sebelumnya pada
+chunk berikutnya. Cara ini membantu menjaga hubungan antarinformasi
+ketika batas pemotongan dokumen berada di tengah pembahasan. Pada
+eksperimen ini, overlap 20 dan 40 berhasil menjawab Q1, sedangkan
+overlap 0 belum berhasil.
 
-```text
-rag-learn/
-├── main.py                     # Route API, halaman utama, dan static files
-├── schemas.py                  # Model request pertanyaan dan brief
-├── config.py                   # Environment, lokasi data, dan parameter RAG
-├── rag.py                      # Ingestion, retrieval, prompt, dan referensi
-├── pdf_loader.py               # Ekstraksi teks PDF per halaman
-├── chunker.py                  # Pemecahan teks berbasis tokenizer
-├── embeddings.py               # Inisialisasi model dan embedding
-├── vector_store.py             # Koleksi, upsert, dan pencarian Qdrant lokal
-├── llm.py                      # Integrasi async dengan Groq
-├── requirements.txt            # Dependensi Python
-├── .env.example                # Template konfigurasi
-├── .gitignore
-├── DESIGN-SKYNIGHT-SUBTLE.md    # Spesifikasi desain website
-├── README.md
-├── static/
-│   ├── index.html              # Struktur website
-│   ├── styles.css              # Token desain, komponen, dan gaya Markdown
-│   ├── app.js                  # API client, upload, tab, dan renderer
-│   └── vendor/                 # Marked, DOMPurify, dan lisensi
-├── data/
-│   └── uploads/                # PDF yang diunggah
-└── qdrant_data/                # Database vektor lokal
-```
+**6. Mengapa perubahan Chunk Size dan Chunk Overlap membutuhkan
+ingestion ulang?**
 
-## Penyimpanan dan siklus data
+Kedua parameter menentukan cara aplikasi membagi dokumen menjadi chunk.
+Perubahan nilainya mengubah isi dan batas setiap chunk. Aplikasi perlu
+membentuk ulang chunk, membuat embedding baru, dan menyimpan hasilnya
+kembali ke Qdrant. Karena itu, database lama perlu dihapus sebelum
+ingestion ulang agar hasil konfigurasi sebelumnya tidak bercampur.
 
-| Data | Lokasi | Perilaku |
-| --- | --- | --- |
-| PDF asli | `data/uploads/` | Disimpan sebelum ingestion dijalankan |
-| Vektor, teks potongan, metadata | `qdrant_data/` | Persisten pada disk dan digunakan lintas sesi browser |
-| Daftar upload frontend | `sessionStorage`, key `simple-rag-session-uploads` | Metadata upload untuk sesi tab; bukan daftar seluruh koleksi |
-| Jawaban dan brief pada UI | Memori halaman / DOM | Hilang saat halaman dimuat ulang |
-| Model dan tokenizer | Cache library Hugging Face | Diunduh ketika belum tersedia |
+**7. Mengapa perubahan Temperature tidak membutuhkan ingestion ulang?**
 
-Tidak ada endpoint untuk daftar seluruh dokumen, unduh PDF, hapus dokumen, atau reset koleksi. Menghapus item dari penyimpanan browser tidak menghapus data backend. Menghapus PDF dari folder upload juga tidak otomatis menghapus potongan yang sudah tersimpan di Qdrant.
+Temperature bekerja pada tahap generation ketika LLM menyusun jawaban.
+Parameter ini tidak mengubah teks hasil ekstraksi, chunk, embedding,
+atau vector yang tersimpan di Qdrant. Karena itu, perubahan temperature
+tidak membutuhkan ingestion ulang.
 
-Upload ulang membuat point ID baru dan menambahkan potongan lagi, tanpa deduplikasi. Jika nama file sama, PDF pada disk ditimpa sementara potongan lama tetap ada dalam koleksi.
+**8. Apakah ada satu konfigurasi RAG yang selalu paling baik untuk semua
+jenis dokumen?**
 
-Untuk memulai knowledge base baru tanpa membuang data lama, hentikan server lalu ubah `QDRANT_PATH` ke direktori baru dalam `config.py`; setelah server dijalankan kembali, unggah dokumen yang diperlukan. Data lama tetap ada pada path sebelumnya.
+Tidak. Kualitas konfigurasi RAG bergantung pada struktur dokumen,
+panjang informasi, jenis pertanyaan, model embedding, model LLM, dan
+kebutuhan pengguna. Konfigurasi yang bekerja baik pada artikel PM2,5
+belum tentu memberikan hasil sama pada dokumen lain. Pengguna perlu
+menguji parameter berdasarkan karakteristik dokumen dan pertanyaan.
 
-## Kustomisasi
+## 10. Personal Reflection
 
-- **Warna, radius, font:** ubah token `:root` pada `static/styles.css`, dengan [spesifikasi desain](DESIGN-SKYNIGHT-SUBTLE.md) sebagai referensi.
-- **Gaya tabel dan Markdown:** ubah selector `.markdown-body` dan `.markdown-table-scroll`.
-- **Layout dan teks antarmuka:** edit `static/index.html`.
-- **Perilaku API client:** edit `static/app.js`.
-- **Prompt dan struktur respons:** edit system prompt di `rag.py`.
-- **Model generasi:** ubah `GROQ_MODEL` dalam `.env` lalu restart server.
-- **Jumlah konteks dan chunking:** ubah parameter di `config.py`. Perubahan chunking berlaku untuk ingestion baru; dokumen lama perlu diindeks ulang pada koleksi baru agar konsisten.
-- **Library frontend:** informasi versi, sumber, dan lisensi tersedia di [static/vendor/README.md](static/vendor/README.md).
+**Bagian eksperimen mana yang hasilnya paling berbeda dari dugaan?**
 
-## Batasan aplikasi
+Pengujian CHUNK_SIZE = 50 memberikan hasil yang paling berbeda. Jumlah
+chunk meningkat menjadi 221, tetapi jawaban Q2 belum menampilkan seluruh
+metrik. Jumlah chunk lebih banyak tidak otomatis meningkatkan
+kelengkapan jawaban.
 
-- PDF berbasis gambar belum diproses dengan OCR.
-- Pencarian memakai teks hasil ekstraksi, bukan pemahaman visual terhadap gambar atau layout tabel PDF.
-- Seluruh dokumen memakai satu knowledge base; belum ada autentikasi, pemisahan pengguna, atau filter dokumen per pertanyaan.
-- Tidak ada riwayat percakapan atau konteks pertanyaan sebelumnya yang dikirim ke LLM.
-- Respons belum menggunakan streaming.
-- Retrieval mengambil potongan terdekat tanpa threshold relevansi atau reranking.
-- Prompt menginstruksikan LLM memakai konteks saja, tetapi kualitas jawaban tetap dipengaruhi retrieval dan perilaku model.
-- File upload dibaca penuh ke memori, tanpa batas ukuran khusus pada kode aplikasi.
-- Ingestion menjalankan ekstraksi dan embedding secara sinkron dalam handler; belum ada antrean background.
-- Qdrant lokal dipakai oleh satu proses. Deployment multiproses membutuhkan perubahan arsitektur penyimpanan.
-- Dependensi Python dalam `requirements.txt` belum dipin ke versi tertentu.
-- Aplikasi belum menyediakan kontrol akses dan pembatasan permintaan untuk layanan publik.
+**Parameter mana yang awalnya dianggap tidak terlalu penting tetapi
+ternyata berpengaruh?**
 
-## Pemecahan masalah
+CHUNK_OVERLAP. Pada overlap 0, aplikasi belum berhasil menjawab Q1
+secara memadai. Ketika overlap menjadi 20 dan 40, Q1 berhasil dijawab.
+Bagian teks yang berulang di antara chunk dapat membantu mempertahankan
+konteks.
 
-### `GROQ_API_KEY` belum diisi atau ditolak
+**Bagaimana hubungan Retrieval dan Generation pada RAG?**
 
-Isi API key pada `.env` di root proyek, pastikan key aktif, lalu restart server. Jangan menaruh key di file frontend atau membagikan `.env`.
+Retrieval mencari dan mengambil potongan dokumen yang relevan dengan
+pertanyaan. Generation menggunakan potongan tersebut untuk menyusun
+jawaban. Keduanya saling bergantung. Jika retrieval tidak mengambil
+informasi yang dibutuhkan, generation dapat memberikan jawaban tidak
+lengkap meskipun model LLM mampu menyusun kalimat dengan baik.
 
-### Model Groq tidak tersedia / rate limit
+**Jika aplikasi dikembangkan lebih lanjut, bagian apa yang ingin
+diuji?**
 
-Gunakan model yang dapat diakses akun Anda melalui `GROQ_MODEL`. Untuk rate limit, tunggu sebelum mengirim ulang dan perhatikan batas akun. Detail exception dapat dilihat pada terminal server.
+Pengembangan berikutnya dapat menguji reranking untuk mengurutkan ulang
+hasil retrieval, hybrid search untuk menggabungkan pencarian semantik
+dan kata kunci, serta evaluasi retrieval menggunakan kumpulan pertanyaan
+dan jawaban acuan. Pengujian tersebut dapat membantu menilai relevansi
+konteks dan ketepatan jawaban secara lebih terukur.
 
-### Startup lama atau pengunduhan model gagal
+## 11. AI Usage
 
-Pastikan koneksi internet tersedia dan cache model dapat ditulis. Model embedding serta tokenizer dimuat saat modul backend diimpor, sehingga website belum tersedia sebelum inisialisasi selesai.
+**AI tools yang digunakan:** ChatGPT.
 
-### `No readable text was found in the PDF.`
+**AI digunakan untuk membantu bagian apa?**
 
-Dokumen tidak menghasilkan teks yang dapat diproses. Gunakan PDF berbasis teks atau lakukan OCR terlebih dahulu. PDF rusak atau terenkripsi juga dapat memerlukan perbaikan sebelum diunggah.
+ChatGPT membantu memahami instruksi eksperimen, menjelaskan konsep
+Retrieval-Augmented Generation, merapikan dokumentasi hasil,
+membandingkan pengaruh parameter, dan menyusun refleksi berdasarkan
+hasil yang diperoleh.
 
-### Direktori Qdrant sedang dipakai
+**Bagian eksperimen mana yang dilakukan dan dievaluasi sendiri?**
 
-Hentikan proses lain yang memakai `qdrant_data/`. Jalankan satu instance backend dengan satu worker untuk penyimpanan lokal.
+Pengguna menjalankan aplikasi Simple RAG pada komputer sendiri, mengubah
+parameter pada file konfigurasi, melakukan ingestion ulang ketika
+mengubah parameter chunking, mengunggah PDF, mengajukan Q1 dan Q2, serta
+mengamati jawaban dan referensi sumber pada aplikasi. ChatGPT membantu
+mengorganisasi dan menjelaskan hasil tersebut. Nilai eksperimen dalam
+README mengikuti hasil yang tercatat dari aplikasi.
 
-### Daftar upload kosong setelah menutup tab
+## 12. Catatan Data dan Batasan
 
-Daftar UI berasal dari sesi tab browser. Koleksi backend tetap ada di disk dan masih dapat ditelusuri melalui pertanyaan atau brief.
+1.  Similarity score hanya dicantumkan pada percobaan yang memiliki
+    catatan angka. Nilai yang tidak terlihat pada hasil aplikasi tidak
+    dibuat atau diperkirakan.
+2.  Beberapa pengulangan temperature 0.8 menghasilkan keluaran Q2 yang
+    berbeda kelengkapannya. Karena itu, kelengkapan Q2 pada temperature
+    0.8 belum dapat dinyatakan konsisten.
+3.  Pada beberapa variasi chunk, catatan sumber hanya memuat halaman
+    utama atau rentang halaman. README tidak menambahkan similarity
+    score yang tidak tersedia.
+4.  Konfigurasi final menggunakan baseline yang telah menghasilkan
+    jawaban lengkap untuk Q1 dan Q2. Pemilihan ini didasarkan pada bukti
+    hasil eksperimen, bukan klaim bahwa konfigurasi tersebut paling baik
+    untuk semua dokumen.
 
-### Respons kurang relevan
+## 13. Checklist Sebelum Pengumpulan
 
-Gunakan pertanyaan lebih spesifik, pastikan teks PDF dapat diekstrak, dan perhatikan sumber yang dikembalikan. Sesuaikan parameter retrieval atau gunakan knowledge base baru yang lebih fokus bila dokumen bercampur.
-
-### Markdown masih muncul sebagai teks biasa
-
-Muat ulang halaman setelah perubahan asset frontend. Pastikan file `static/vendor/marked.umd.js` dan `static/vendor/purify.min.js` ikut disalin ketika memindahkan proyek. Fallback teks digunakan bila library tidak termuat. Agar tabel dirender, output harus memakai sintaks tabel Markdown yang valid.
-
-### Tampilan font berbeda
-
-Font berasal dari Google Fonts. Jika akses jaringan ke layanan tersebut tidak tersedia, browser menggunakan font fallback; fungsi aplikasi dan rendering Markdown lokal tetap tersedia.
+- [ ] Aplikasi berhasil dijalankan.
+- [ ] PDF berhasil di-ingest.
+- [ ] Q1 dan Q2 berhasil diuji.
+- [ ] Eksperimen Temperature selesai.
+- [ ] Eksperimen TOP_K selesai.
+- [ ] Eksperimen CHUNK_SIZE selesai.
+- [ ] Eksperimen CHUNK_OVERLAP selesai.
+- [ ] Actual output dan sumber dicatat.
+- [ ] Similarity score dicatat jika tersedia.
+- [ ] Jumlah `chunks_stored` dicatat.
+- [ ] README.md sudah diperiksa.
+- [ ] Final configuration dan refleksi sudah dicantumkan.
+- [ ] File `.env` tidak ikut diunggah.
+- [ ] Folder `venv/`, `qdrant_data/`, `data/uploads/`, dan
+  `__pycache__/` tidak ikut diunggah.
+- [ ] Repository GitHub `tugas-rag-experiment` sudah dibuat dan berisi
+  source code serta README.
+- [ ] Link repository siap dikumpulkan ke LMS.

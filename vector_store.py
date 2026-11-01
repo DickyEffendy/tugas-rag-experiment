@@ -1,4 +1,4 @@
-from uuid import uuid4
+from uuid import uuid5, NAMESPACE_URL
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -31,7 +31,10 @@ def store_chunks(
     for chunk, vector in zip(chunks, vectors):
         points.append(
             PointStruct(
-                id=str(uuid4()),
+                id=str(uuid5(
+    NAMESPACE_URL,
+    f"{chunk['source']}|{chunk['page']}|{chunk['chunk_index']}"
+)),
                 vector=vector,
                 payload=chunk,
             )

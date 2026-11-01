@@ -1,6 +1,25 @@
+# Environment variables
 .env
+
+# Python virtual environment
 .venv/
 venv/
-pycache/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Vector database
 qdrant_data/
+
+# Uploaded PDF documents
 data/uploads/*.pdf
+
+# Development cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Operating system files
+.DS_Store
+Thumbs.db
